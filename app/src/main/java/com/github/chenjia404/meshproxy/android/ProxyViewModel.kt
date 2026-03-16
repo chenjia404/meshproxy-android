@@ -5,10 +5,27 @@ import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+data class ProxyStatusSnapshot(
+    val relaysKnown: Int? = null,
+    val exitsKnown: Int? = null,
+    val relayCount: Int? = null,
+    val exitCount: Int? = null,
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+)
 
 class ProxyViewModel : ViewModel() {
 
@@ -27,8 +44,19 @@ class ProxyViewModel : ViewModel() {
     private val _tunnelSettings = MutableStateFlow(VpnTunnelSettings())
     val tunnelSettings: StateFlow<VpnTunnelSettings> = _tunnelSettings.asStateFlow()
 
+    private val _proxyStatus = MutableStateFlow(ProxyStatusSnapshot())
+    val proxyStatus: StateFlow<ProxyStatusSnapshot> = _proxyStatus.asStateFlow()
+
+    private var statusPollingJob: Job? = null
+
     fun updateServiceStatus(context: Context) {
-        _isRunning.value = isServiceRunning(context, ProxyService::class.java)
+        val isRunning = isServiceRunning(context, ProxyService::class.java)
+        _isRunning.value = isRunning
+        if (isRunning) {
+            startStatusPolling()
+        } else {
+            stopStatusPolling()
+        }
     }
 
     fun loadVpnApps(context: Context) {
@@ -66,6 +94,7 @@ class ProxyViewModel : ViewModel() {
         intent.action = ProxyService.ACTION_START
         context.startForegroundService(intent)
         _isRunning.value = true
+        startStatusPolling()
     }
 
     fun stopProxy(context: Context) {
@@ -73,6 +102,7 @@ class ProxyViewModel : ViewModel() {
         intent.action = ProxyService.ACTION_STOP
         context.startService(intent)
         _isRunning.value = false
+        stopStatusPolling()
     }
 
     fun setVpnAppSelected(context: Context, packageName: String, selected: Boolean) {
@@ -113,5 +143,100 @@ class ProxyViewModel : ViewModel() {
 
     fun clearLogs() {
         _logs.value = emptyList()
+    }
+
+    override fun onCleared() {
+        stopStatusPolling()
+        super.onCleared()
+    }
+
+    private fun startStatusPolling() {
+        if (statusPollingJob?.isActive == true) {
+            return
+        }
+
+        statusPollingJob = viewModelScope.launch {
+            _proxyStatus.value = ProxyStatusSnapshot(isLoading = true)
+            while (isActive) {
+                val previousStatus = _proxyStatus.value
+                _proxyStatus.value = fetchProxyStatus(previousStatus)
+                delay(5_000)
+            }
+        }
+    }
+
+    private fun stopStatusPolling() {
+        statusPollingJob?.cancel()
+        statusPollingJob = null
+        _proxyStatus.value = ProxyStatusSnapshot()
+    }
+
+    private suspend fun fetchProxyStatus(previousStatus: ProxyStatusSnapshot): ProxyStatusSnapshot {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = (URL(STATUS_URL).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = STATUS_TIMEOUT_MS
+                    readTimeout = STATUS_TIMEOUT_MS
+                }
+
+                connection.use { httpConnection ->
+                    check(httpConnection.responseCode in 200..299) {
+                        "HTTP ${httpConnection.responseCode}"
+                    }
+                    val body = httpConnection.inputStream.bufferedReader().use { it.readText() }
+                    parseProxyStatus(body)
+                }
+            }.getOrElse { error ->
+                previousStatus.copy(
+                    isLoading = false,
+                    errorMessage = error.message ?: "Unable to read status API"
+                )
+            }
+        }
+    }
+
+    private fun parseProxyStatus(responseBody: String): ProxyStatusSnapshot {
+        val json = JSONObject(responseBody)
+        val payload = json.optJSONObject("data")
+        val sources = listOfNotNull(json, payload)
+        val relaysKnown = sources.firstNotNullOfOrNull { it.optIntValue("relays_known") }
+        val exitsKnown = sources.firstNotNullOfOrNull { it.optIntValue("exits_known") }
+
+        return ProxyStatusSnapshot(
+            relaysKnown = relaysKnown,
+            exitsKnown = exitsKnown,
+            relayCount = relaysKnown,
+            exitCount = exitsKnown,
+            isLoading = false,
+            errorMessage = null
+        )
+    }
+
+    private fun JSONObject.optIntValue(vararg keys: String): Int? {
+        for (key in keys) {
+            if (!has(key) || isNull(key)) {
+                continue
+            }
+
+            when (val value = opt(key)) {
+                is Number -> return value.toInt()
+                is String -> value.toIntOrNull()?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun <T : HttpURLConnection> T.use(block: (T) -> ProxyStatusSnapshot): ProxyStatusSnapshot {
+        return try {
+            block(this)
+        } finally {
+            disconnect()
+        }
+    }
+
+    companion object {
+        private const val STATUS_URL = "http://127.0.0.1:19080/api/v1/status"
+        private const val STATUS_TIMEOUT_MS = 1_500
     }
 }

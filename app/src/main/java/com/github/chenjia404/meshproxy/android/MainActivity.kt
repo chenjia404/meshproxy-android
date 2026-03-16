@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
         val vpnApps by viewModel.vpnApps.collectAsStateWithLifecycle()
         val selectedVpnApps by viewModel.selectedVpnApps.collectAsStateWithLifecycle()
         val tunnelSettings by viewModel.tunnelSettings.collectAsStateWithLifecycle()
+        val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
         val context = LocalContext.current
         val configuration = LocalConfiguration.current
         val bound by isBound
@@ -182,6 +183,36 @@ class MainActivity : ComponentActivity() {
                                 style = MaterialTheme.typography.titleMedium,
                                 color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                             )
+                            if (isRunning) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = buildString {
+                                        append("Relay: ")
+                                        append(proxyStatus.relayCount?.toString() ?: "-")
+                                        append("    Exit: ")
+                                        append(proxyStatus.exitCount?.toString() ?: "-")
+                                    },
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                if (proxyStatus.isLoading) {
+                                    Text(
+                                        text = "Loading status from 127.0.0.1:19080...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else if (proxyStatus.errorMessage != null &&
+                                    proxyStatus.relaysKnown == null &&
+                                    proxyStatus.exitsKnown == null &&
+                                    proxyStatus.relayCount == null &&
+                                    proxyStatus.exitCount == null
+                                ) {
+                                    Text(
+                                        text = "Status API not ready yet",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                             Text(
                                 text = "Control the background binary process",
                                 style = MaterialTheme.typography.bodySmall
