@@ -30,6 +30,12 @@ data class ProxyStatusSnapshot(
     val errorMessage: String? = null,
 )
 
+data class AppUpdateInfo(
+    val currentVersion: String,
+    val latestVersion: String,
+    val releaseUrl: String,
+)
+
 class ProxyViewModel : ViewModel() {
 
     private val _isRunning = MutableStateFlow(false)
@@ -50,7 +56,11 @@ class ProxyViewModel : ViewModel() {
     private val _proxyStatus = MutableStateFlow(ProxyStatusSnapshot())
     val proxyStatus: StateFlow<ProxyStatusSnapshot> = _proxyStatus.asStateFlow()
 
+    private val _appUpdateInfo = MutableStateFlow<AppUpdateInfo?>(null)
+    val appUpdateInfo: StateFlow<AppUpdateInfo?> = _appUpdateInfo.asStateFlow()
+
     private var statusPollingJob: Job? = null
+    private var hasCheckedForUpdates = false
 
     fun updateServiceStatus(context: Context) {
         val isRunning = isServiceRunning(context, ProxyService::class.java)
@@ -148,6 +158,21 @@ class ProxyViewModel : ViewModel() {
         _logs.value = emptyList()
     }
 
+    fun checkForAppUpdate() {
+        if (hasCheckedForUpdates) {
+            return
+        }
+        hasCheckedForUpdates = true
+
+        viewModelScope.launch {
+            _appUpdateInfo.value = fetchLatestReleaseInfo()
+        }
+    }
+
+    fun dismissAppUpdatePrompt() {
+        _appUpdateInfo.value = null
+    }
+
     override fun onCleared() {
         stopStatusPolling()
         super.onCleared()
@@ -199,6 +224,28 @@ class ProxyViewModel : ViewModel() {
         }
     }
 
+    private suspend fun fetchLatestReleaseInfo(): AppUpdateInfo? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = (URL(GITHUB_LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = STATUS_TIMEOUT_MS
+                    readTimeout = STATUS_TIMEOUT_MS
+                    setRequestProperty("Accept", "application/vnd.github+json")
+                    setRequestProperty("User-Agent", "meshproxy-android")
+                }
+
+                connection.use { httpConnection ->
+                    check(httpConnection.responseCode in 200..299) {
+                        "HTTP ${httpConnection.responseCode}"
+                    }
+                    val body = httpConnection.inputStream.bufferedReader().use { it.readText() }
+                    parseLatestReleaseInfo(body)
+                }
+            }.getOrNull()
+        }
+    }
+
     private fun parseProxyStatus(responseBody: String): ProxyStatusSnapshot {
         val json = JSONObject(responseBody)
         val payload = json.optJSONObject("data")
@@ -216,6 +263,23 @@ class ProxyViewModel : ViewModel() {
             socks5Listen = sources.firstNotNullOfOrNull { it.optStringValue("socks5_listen") },
             isLoading = false,
             errorMessage = null
+        )
+    }
+
+    private fun parseLatestReleaseInfo(responseBody: String): AppUpdateInfo? {
+        val json = JSONObject(responseBody)
+        val latestVersion = json.optStringValue("tag_name", "name") ?: return null
+        val releaseUrl = json.optStringValue("html_url") ?: GITHUB_RELEASES_PAGE
+        val currentVersion = BuildConfig.VERSION_NAME
+
+        if (!isRemoteVersionNewer(latestVersion, currentVersion)) {
+            return null
+        }
+
+        return AppUpdateInfo(
+            currentVersion = currentVersion,
+            latestVersion = latestVersion,
+            releaseUrl = releaseUrl
         )
     }
 
@@ -257,6 +321,31 @@ class ProxyViewModel : ViewModel() {
         return null
     }
 
+    private fun isRemoteVersionNewer(remoteVersion: String, localVersion: String): Boolean {
+        val remoteParts = versionParts(remoteVersion)
+        val localParts = versionParts(localVersion)
+        val maxSize = maxOf(remoteParts.size, localParts.size)
+
+        for (index in 0 until maxSize) {
+            val remote = remoteParts.getOrElse(index) { 0 }
+            val local = localParts.getOrElse(index) { 0 }
+            if (remote != local) {
+                return remote > local
+            }
+        }
+
+        return remoteVersion.trim() != localVersion.trim() &&
+            remoteVersion.trim().removePrefix("v") != localVersion.trim().removePrefix("v")
+    }
+
+    private fun versionParts(version: String): List<Int> {
+        return version
+            .trim()
+            .removePrefix("v")
+            .split('.', '-', '_')
+            .mapNotNull { it.toIntOrNull() }
+    }
+
     private fun <T : HttpURLConnection> T.use(block: (T) -> ProxyStatusSnapshot): ProxyStatusSnapshot {
         return try {
             block(this)
@@ -268,5 +357,9 @@ class ProxyViewModel : ViewModel() {
     companion object {
         private const val STATUS_URL = "http://127.0.0.1:19080/api/v1/status"
         private const val STATUS_TIMEOUT_MS = 1_500
+        private const val GITHUB_LATEST_RELEASE_API =
+            "https://api.github.com/repos/chenjia404/meshproxy-android/releases/latest"
+        private const val GITHUB_RELEASES_PAGE =
+            "https://github.com/chenjia404/meshproxy-android/releases"
     }
 }

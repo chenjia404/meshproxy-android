@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.net.VpnService
 import android.os.Bundle
 import android.os.IBinder
@@ -84,6 +85,7 @@ class MainActivity : ComponentActivity() {
         val selectedVpnApps by viewModel.selectedVpnApps.collectAsStateWithLifecycle()
         val tunnelSettings by viewModel.tunnelSettings.collectAsStateWithLifecycle()
         val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
+        val appUpdateInfo by viewModel.appUpdateInfo.collectAsStateWithLifecycle()
         val context = LocalContext.current
         val configuration = LocalConfiguration.current
         val bound by isBound
@@ -115,6 +117,7 @@ class MainActivity : ComponentActivity() {
             viewModel.updateServiceStatus(context)
             viewModel.loadVpnApps(context)
             viewModel.loadTunnelSettings(context)
+            viewModel.checkForAppUpdate()
             if (
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(
@@ -162,6 +165,41 @@ class MainActivity : ComponentActivity() {
             },
             modifier = Modifier.fillMaxSize()
         ) { innerPadding ->
+            appUpdateInfo?.let { updateInfo ->
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissAppUpdatePrompt() },
+                    title = {
+                        Text(stringResource(R.string.update_available_title))
+                    },
+                    text = {
+                        Text(
+                            stringResource(
+                                R.string.update_available_message,
+                                updateInfo.latestVersion,
+                                updateInfo.currentVersion
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                openReleasePage(context, updateInfo.releaseUrl)
+                                viewModel.dismissAppUpdatePrompt()
+                            }
+                        ) {
+                            Text(stringResource(R.string.update_now))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { viewModel.dismissAppUpdatePrompt() }
+                        ) {
+                            Text(stringResource(R.string.later))
+                        }
+                    }
+                )
+            }
+
             Column(
                 modifier = Modifier
                     .padding(innerPadding)
@@ -298,6 +336,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun openReleasePage(context: Context, releaseUrl: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
     }
 
     @Composable

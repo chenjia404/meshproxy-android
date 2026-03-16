@@ -4,6 +4,10 @@
     <string name="proxy_stopped">Proxy is STOPPED</string>
     <string name="control_background_binary_process">Control the background binary process</string>
     <string name="notification_permission_denied">Notification permission not granted; foreground keep-alive notifications may be hidden</string>
+    <string name="update_available_title">Update Available</string>
+    <string name="update_available_message">Latest version: %1$s\nCurrent version: %2$s\n\nOpen GitHub Releases?</string>
+    <string name="update_now">Update</string>
+    <string name="later">Later</string>
     <string name="enable_ipv4_or_ipv6">Enable at least IPv4 or IPv6</string>
     <string name="stop_proxy">Stop Proxy</string>
     <string name="start_proxy">Start Proxy</string>
