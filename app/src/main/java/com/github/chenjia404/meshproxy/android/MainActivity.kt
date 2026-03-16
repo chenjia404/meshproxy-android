@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
             viewModel.updateServiceStatus(context)
             viewModel.loadVpnApps(context)
             viewModel.loadTunnelSettings(context)
-            viewModel.checkForAppUpdate()
+            viewModel.checkForAppUpdate(context)
             if (
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(

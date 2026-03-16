@@ -158,14 +158,14 @@ class ProxyViewModel : ViewModel() {
         _logs.value = emptyList()
     }
 
-    fun checkForAppUpdate() {
+    fun checkForAppUpdate(context: Context) {
         if (hasCheckedForUpdates) {
             return
         }
         hasCheckedForUpdates = true
 
         viewModelScope.launch {
-            _appUpdateInfo.value = fetchLatestReleaseInfo()
+            _appUpdateInfo.value = fetchLatestReleaseInfo(context)
         }
     }
 
@@ -224,7 +224,7 @@ class ProxyViewModel : ViewModel() {
         }
     }
 
-    private suspend fun fetchLatestReleaseInfo(): AppUpdateInfo? {
+    private suspend fun fetchLatestReleaseInfo(context: Context): AppUpdateInfo? {
         return withContext(Dispatchers.IO) {
             runCatching {
                 val connection = (URL(GITHUB_LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
@@ -240,7 +240,7 @@ class ProxyViewModel : ViewModel() {
                         "HTTP ${httpConnection.responseCode}"
                     }
                     val body = httpConnection.inputStream.bufferedReader().use { it.readText() }
-                    parseLatestReleaseInfo(body)
+                    parseLatestReleaseInfo(body, context)
                 }
             }.getOrNull()
         }
@@ -266,11 +266,11 @@ class ProxyViewModel : ViewModel() {
         )
     }
 
-    private fun parseLatestReleaseInfo(responseBody: String): AppUpdateInfo? {
+    private fun parseLatestReleaseInfo(responseBody: String, context: Context): AppUpdateInfo? {
         val json = JSONObject(responseBody)
         val latestVersion = json.optStringValue("tag_name", "name") ?: return null
         val releaseUrl = json.optStringValue("html_url") ?: GITHUB_RELEASES_PAGE
-        val currentVersion = BuildConfig.VERSION_NAME
+        val currentVersion = currentAppVersion(context)
 
         if (!isRemoteVersionNewer(latestVersion, currentVersion)) {
             return null
@@ -321,6 +321,11 @@ class ProxyViewModel : ViewModel() {
         return null
     }
 
+    private fun currentAppVersion(context: Context): String {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        return packageInfo.versionName ?: "0"
+    }
+
     private fun isRemoteVersionNewer(remoteVersion: String, localVersion: String): Boolean {
         val remoteParts = versionParts(remoteVersion)
         val localParts = versionParts(localVersion)
@@ -346,7 +351,7 @@ class ProxyViewModel : ViewModel() {
             .mapNotNull { it.toIntOrNull() }
     }
 
-    private fun <T : HttpURLConnection> T.use(block: (T) -> ProxyStatusSnapshot): ProxyStatusSnapshot {
+    private fun <T : HttpURLConnection, R> T.use(block: (T) -> R): R {
         return try {
             block(this)
         } finally {
