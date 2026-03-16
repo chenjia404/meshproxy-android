@@ -23,6 +23,9 @@ data class ProxyStatusSnapshot(
     val exitsKnown: Int? = null,
     val relayCount: Int? = null,
     val exitCount: Int? = null,
+    val peerId: String? = null,
+    val uptimeSeconds: Long? = null,
+    val socks5Listen: String? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -208,6 +211,9 @@ class ProxyViewModel : ViewModel() {
             exitsKnown = exitsKnown,
             relayCount = relaysKnown,
             exitCount = exitsKnown,
+            peerId = sources.firstNotNullOfOrNull { it.optStringValue("peer_id") },
+            uptimeSeconds = sources.firstNotNullOfOrNull { it.optLongValue("uptime_seconds") },
+            socks5Listen = sources.firstNotNullOfOrNull { it.optStringValue("socks5_listen") },
             isLoading = false,
             errorMessage = null
         )
@@ -222,6 +228,30 @@ class ProxyViewModel : ViewModel() {
             when (val value = opt(key)) {
                 is Number -> return value.toInt()
                 is String -> value.toIntOrNull()?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun JSONObject.optLongValue(vararg keys: String): Long? {
+        for (key in keys) {
+            if (!has(key) || isNull(key)) {
+                continue
+            }
+
+            when (val value = opt(key)) {
+                is Number -> return value.toLong()
+                is String -> value.toLongOrNull()?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun JSONObject.optStringValue(vararg keys: String): String? {
+        for (key in keys) {
+            val value = optString(key, "").trim()
+            if (value.isNotEmpty()) {
+                return value
             }
         }
         return null

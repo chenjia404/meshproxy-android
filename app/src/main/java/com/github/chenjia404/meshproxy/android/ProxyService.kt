@@ -103,7 +103,14 @@ class ProxyService : VpnService() {
         startupJob = serviceScope.launch {
             val binaryManager = BinaryManager(this@ProxyService)
             val startedProcess = runCatching { binaryManager.executeBinary() }
-                .onFailure { emitLog("Failed to start meshproxy binary: ${it.message}") }
+                .onFailure {
+                    emitLog(
+                        getString(
+                            R.string.log_failed_start_binary,
+                            it.message ?: getString(R.string.unknown_value)
+                        )
+                    )
+                }
                 .getOrNull()
             if (startedProcess == null) {
                 requestStopProxy()
@@ -114,25 +121,30 @@ class ProxyService : VpnService() {
                 process = startedProcess
             }
 
-            emitLog(
-                "meshproxy started, waiting for SOCKS5 on $SOCKS_HOST:$SOCKS_PORT"
-            )
+            emitLog(getString(R.string.log_meshproxy_started_waiting_socks, SOCKS_HOST, SOCKS_PORT))
             startProcessObservers(startedProcess)
 
             val socksReadyFailure = waitForSocksReady(startedProcess)
             if (socksReadyFailure != null) {
-                emitLog("Stopped waiting for SOCKS5 on $SOCKS_HOST:$SOCKS_PORT: $socksReadyFailure")
+                emitLog(
+                    getString(
+                        R.string.log_stopped_waiting_for_socks,
+                        SOCKS_HOST,
+                        SOCKS_PORT,
+                        socksReadyFailure
+                    )
+                )
                 requestStopProxy()
                 return@launch
             }
 
             if (!startTunnel()) {
-                emitLog("Failed to start VPN tunnel.")
+                emitLog(getString(R.string.log_failed_start_vpn_tunnel))
                 requestStopProxy()
                 return@launch
             }
 
-            emitLog("VPN is active via SOCKS5 $SOCKS_HOST:$SOCKS_PORT")
+            emitLog(getString(R.string.log_vpn_active_via_socks, SOCKS_HOST, SOCKS_PORT))
         }
     }
 
@@ -148,7 +160,12 @@ class ProxyService : VpnService() {
                         emitLog(line)
                     }
                 } catch (e: Exception) {
-                    emitLog("Error reading logs: ${e.message}")
+                    emitLog(
+                        getString(
+                            R.string.log_error_reading_logs,
+                            e.message ?: getString(R.string.unknown_value)
+                        )
+                    )
                 }
             }
         }
@@ -156,7 +173,7 @@ class ProxyService : VpnService() {
         processMonitorJob = serviceScope.launch {
             val exitCode = runCatching { startedProcess.waitFor() }.getOrNull()
             if (exitCode != null) {
-                emitLog("meshproxy exited with code $exitCode")
+                emitLog(getString(R.string.log_meshproxy_exited_code, exitCode))
             }
             requestStopProxy()
         }
@@ -164,12 +181,12 @@ class ProxyService : VpnService() {
 
     private suspend fun waitForSocksReady(startedProcess: Process): String? {
         val coroutineContext = currentCoroutineContext()
-        var lastFailure = "waiting for a successful SOCKS5 handshake"
+        var lastFailure = getString(R.string.log_waiting_for_successful_socks_handshake)
         var nextProgressLogAt = SystemClock.elapsedRealtime()
 
         while (coroutineContext.isActive) {
             if (!startedProcess.isAlive) {
-                return "meshproxy process exited before SOCKS5 became ready"
+                return getString(R.string.log_meshproxy_exited_before_socks_ready)
             }
 
             val probeResult = runCatching {
@@ -182,8 +199,12 @@ class ProxyService : VpnService() {
 
                     val response = ByteArray(2)
                     DataInputStream(socket.getInputStream()).readFully(response)
-                    check(response[0].toInt() == 0x05) { "Unexpected SOCKS version: ${response[0]}" }
-                    check(response[1].toInt() != 0xFF) { "SOCKS5 authentication rejected" }
+                    check(response[0].toInt() == 0x05) {
+                        getString(R.string.log_unexpected_socks_version, response[0].toString())
+                    }
+                    check(response[1].toInt() != 0xFF) {
+                        getString(R.string.log_socks5_auth_rejected)
+                    }
                 }
             }
 
@@ -193,17 +214,19 @@ class ProxyService : VpnService() {
 
             lastFailure = probeResult.exceptionOrNull()?.message
                 ?: probeResult.exceptionOrNull()?.javaClass?.simpleName
-                ?: "unknown probe failure"
+                ?: getString(R.string.log_unknown_probe_failure)
 
             val now = SystemClock.elapsedRealtime()
             if (now >= nextProgressLogAt) {
-                emitLog("Still waiting for SOCKS5 on $SOCKS_HOST:$SOCKS_PORT: $lastFailure")
+                emitLog(
+                    getString(R.string.log_still_waiting_for_socks, SOCKS_HOST, SOCKS_PORT, lastFailure)
+                )
                 nextProgressLogAt = now + SOCKS_PROGRESS_LOG_INTERVAL_MS
             }
 
             delay(SOCKS_RETRY_DELAY_MS)
         }
-        return "service coroutine was cancelled while waiting for SOCKS5"
+        return getString(R.string.log_service_coroutine_cancelled)
     }
 
     private suspend fun startTunnel(): Boolean {
@@ -216,12 +239,12 @@ class ProxyService : VpnService() {
         return try {
             val tunnelSettings = VpnTunnelSettingsStore.getSettings(this)
             if (!tunnelSettings.enableIpv4 && !tunnelSettings.enableIpv6) {
-                emitLog("Failed to establish VPN tunnel: both IPv4 and IPv6 are disabled")
+                emitLog(getString(R.string.log_failed_establish_tunnel_both_disabled))
                 return false
             }
 
             val builder = Builder()
-                .setSession("Mesh Proxy VPN")
+                .setSession(getString(R.string.vpn_session_name))
                 .setBlocking(false)
                 .setMtu(TUN_MTU)
             if (tunnelSettings.enableIpv4) {
@@ -242,14 +265,12 @@ class ProxyService : VpnService() {
                 ?: return false
 
             val configFile = writeTunnelConfig(tunnelSettings)
-            emitLog(
-                "VPN protocols: ipv4=${tunnelSettings.enableIpv4}, ipv6=${tunnelSettings.enableIpv6}"
-            )
+            emitLog(getString(R.string.log_vpn_protocols, tunnelSettings.enableIpv4, tunnelSettings.enableIpv6))
             if (!tunnelSettings.enableIpv4) {
-                emitLog("IPv4 disabled: mapdns is off, domain resolution may fail")
+                emitLog(getString(R.string.log_ipv4_disabled_mapdns_off))
             }
-            emitLog("hev-socks5-tunnel socks5.udp mode: $SOCKS_UDP_MODE")
-            emitLog("hev-socks5-tunnel config:\n${configFile.readText()}")
+            emitLog(getString(R.string.log_socks_udp_mode, SOCKS_UDP_MODE))
+            emitLog(getString(R.string.log_socks_config, configFile.readText()))
             TProxyStartService(configFile.absolutePath, establishedTun.fd)
             startStatsObserver()
             showVpnActiveNotification()
@@ -259,7 +280,12 @@ class ProxyService : VpnService() {
             }
             true
         } catch (e: Exception) {
-            emitLog("Failed to establish VPN tunnel: ${e.message}")
+            emitLog(
+                getString(
+                    R.string.log_failed_establish_tunnel,
+                    e.message ?: getString(R.string.unknown_value)
+                )
+            )
             false
         }
     }
@@ -271,7 +297,7 @@ class ProxyService : VpnService() {
 
         if (selectedPackages.isEmpty()) {
             runCatching { builder.addDisallowedApplication(packageName) }
-            emitLog("VPN routing mode: all apps except $packageName")
+            emitLog(getString(R.string.log_vpn_routing_all_apps_except, packageName))
             return
         }
 
@@ -283,17 +309,19 @@ class ProxyService : VpnService() {
             if (added) {
                 allowedCount++
             } else {
-                emitLog("Skip VPN app: $selectedPackage")
+                emitLog(getString(R.string.log_skip_vpn_app, selectedPackage))
             }
         }
 
         if (allowedCount == 0) {
             runCatching { builder.addDisallowedApplication(packageName) }
-            emitLog("VPN routing mode fallback: all apps except $packageName")
+            emitLog(getString(R.string.log_vpn_routing_fallback, packageName))
         } else {
-            emitLog(
-                "VPN routing mode: selected apps only ($allowedCount): ${selectedPackages.joinToString()}"
-            )
+            emitLog(getString(
+                R.string.log_vpn_routing_selected_apps_only,
+                allowedCount,
+                selectedPackages.joinToString()
+            ))
         }
     }
 
@@ -311,10 +339,13 @@ class ProxyService : VpnService() {
                     continue
                 }
                 lastStats = stats.copyOf()
-                emitLog(
-                    "Tunnel stats: txPackets=${stats[0]}, txBytes=${stats[1]}, " +
-                        "rxPackets=${stats[2]}, rxBytes=${stats[3]}"
-                )
+                emitLog(getString(
+                    R.string.log_tunnel_stats,
+                    stats[0],
+                    stats[1],
+                    stats[2],
+                    stats[3]
+                ))
             }
         }
     }
@@ -429,17 +460,17 @@ class ProxyService : VpnService() {
         val manager = getSystemService(NotificationManager::class.java)
         val serviceChannel = NotificationChannel(
             SERVICE_CHANNEL_ID,
-            "Mesh Proxy Service",
+            getString(R.string.notification_channel_service_name),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Foreground service channel used while VPN is starting or stopping"
+            description = getString(R.string.notification_channel_service_desc)
         }
         val vpnChannel = NotificationChannel(
             VPN_ACTIVE_CHANNEL_ID,
-            "Mesh Proxy VPN",
+            getString(R.string.notification_channel_vpn_name),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Foreground VPN keep-alive channel while the VPN is active"
+            description = getString(R.string.notification_channel_vpn_desc)
         }
         manager.createNotificationChannel(serviceChannel)
         manager.createNotificationChannel(vpnChannel)
@@ -448,7 +479,7 @@ class ProxyService : VpnService() {
     private fun startForegroundServiceNotification() {
         val notification = createNotification(
             channelId = SERVICE_CHANNEL_ID,
-            contentText = "Starting VPN bridge"
+            contentText = getString(R.string.notification_starting_vpn_bridge)
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -467,7 +498,7 @@ class ProxyService : VpnService() {
             NOTIFICATION_ID,
             createNotification(
                 channelId = VPN_ACTIVE_CHANNEL_ID,
-                contentText = "VPN active and kept alive in foreground"
+                contentText = getString(R.string.notification_vpn_active)
             )
         )
     }
@@ -479,7 +510,7 @@ class ProxyService : VpnService() {
         )
 
         return NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Mesh Proxy")
+            .setContentTitle(getString(R.string.notification_title))
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)

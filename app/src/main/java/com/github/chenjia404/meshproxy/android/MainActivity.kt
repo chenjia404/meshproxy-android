@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -92,7 +93,11 @@ class MainActivity : ComponentActivity() {
             contract = ActivityResultContracts.RequestPermission()
         ) { granted ->
             if (!granted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                Toast.makeText(context, "通知权限未授予，前台保活通知可能不可见", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.notification_permission_denied),
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
         val vpnPermissionLauncher = rememberLauncherForActivityResult(
@@ -148,7 +153,7 @@ class MainActivity : ComponentActivity() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("meshproxy-android") },
+                    title = { Text(stringResource(R.string.app_name)) },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -179,42 +184,16 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Column {
                             Text(
-                                text = if (isRunning) "Proxy is RUNNING" else "Proxy is STOPPED",
+                                text = if (isRunning) {
+                                    stringResource(R.string.proxy_running)
+                                } else {
+                                    stringResource(R.string.proxy_stopped)
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                             )
-                            if (isRunning) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = buildString {
-                                        append("Relay: ")
-                                        append(proxyStatus.relayCount?.toString() ?: "-")
-                                        append("    Exit: ")
-                                        append(proxyStatus.exitCount?.toString() ?: "-")
-                                    },
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                if (proxyStatus.isLoading) {
-                                    Text(
-                                        text = "Loading status from 127.0.0.1:19080...",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                } else if (proxyStatus.errorMessage != null &&
-                                    proxyStatus.relaysKnown == null &&
-                                    proxyStatus.exitsKnown == null &&
-                                    proxyStatus.relayCount == null &&
-                                    proxyStatus.exitCount == null
-                                ) {
-                                    Text(
-                                        text = "Status API not ready yet",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
                             Text(
-                                text = "Control the background binary process",
+                                text = stringResource(R.string.control_background_binary_process),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -225,7 +204,11 @@ class MainActivity : ComponentActivity() {
                                     viewModel.stopProxy(context)
                                 } else {
                                     if (!tunnelSettings.enableIpv4 && !tunnelSettings.enableIpv6) {
-                                        Toast.makeText(context, "至少开启 IPv4 或 IPv6 其中一个", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.enable_ipv4_or_ipv6),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                         return@FilledIconButton
                                     }
                                     val prepareIntent = VpnService.prepare(context)
@@ -242,11 +225,22 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Icon(
                                 imageVector = if (isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                                contentDescription = if (isRunning) "Stop Proxy" else "Start Proxy"
+                                contentDescription = if (isRunning) {
+                                    stringResource(R.string.stop_proxy)
+                                } else {
+                                    stringResource(R.string.start_proxy)
+                                }
                             )
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                ProxyStatusPanel(
+                    status = proxyStatus,
+                    isRunning = isRunning
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -285,14 +279,14 @@ class MainActivity : ComponentActivity() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Real-time Logs",
+                        text = stringResource(R.string.real_time_logs),
                         style = MaterialTheme.typography.labelLarge
                     )
                     TextButton(
                         onClick = { viewModel.clearLogs() },
                         enabled = logs.isNotEmpty()
                     ) {
-                        Text("Clear")
+                        Text(stringResource(R.string.clear))
                     }
                 }
 
@@ -302,6 +296,97 @@ class MainActivity : ComponentActivity() {
                         .fillMaxWidth()
                         .height(logViewerHeight)
                 )
+            }
+        }
+    }
+
+    @Composable
+    fun ProxyStatusPanel(
+        status: ProxyStatusSnapshot,
+        isRunning: Boolean,
+    ) {
+        val clipboard = LocalClipboardManager.current
+        val context = LocalContext.current
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.proxy_status),
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = stringResource(
+                        R.string.relay_exit_status,
+                        status.relayCount?.toString() ?: "-",
+                        status.exitCount?.toString() ?: "-"
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = stringResource(R.string.peer_id_value, status.peerId ?: "-"),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clickable(enabled = !status.peerId.isNullOrBlank()) {
+                        clipboard.setText(AnnotatedString(status.peerId.orEmpty()))
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.peer_id_copied),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
+                Text(
+                    text = stringResource(
+                        R.string.uptime_seconds_value,
+                        status.uptimeSeconds?.toString() ?: "-"
+                    ),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    text = stringResource(R.string.socks5_listen_value, status.socks5Listen ?: "-"),
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                if (isRunning && status.isLoading) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.status_loading),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (isRunning &&
+                    status.errorMessage != null &&
+                    status.relayCount == null &&
+                    status.exitCount == null &&
+                    status.peerId == null &&
+                    status.uptimeSeconds == null &&
+                    status.socks5Listen == null
+                ) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.status_api_not_ready),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (!isRunning) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.start_proxy_to_load_status),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -325,16 +410,16 @@ class MainActivity : ComponentActivity() {
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "IP Protocols",
+                    text = stringResource(R.string.ip_protocols),
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
-                    text = "关闭 IPv6 后，VPN 不再为应用提供 IPv6 路由",
+                    text = stringResource(R.string.disable_ipv6_hint),
                     style = MaterialTheme.typography.bodySmall
                 )
                 if (isRunning) {
                     Text(
-                        text = "Changes take effect next time the VPN starts",
+                        text = stringResource(R.string.changes_take_effect_next_time),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -351,7 +436,7 @@ class MainActivity : ComponentActivity() {
                         onCheckedChange = onIpv4Change
                     )
                     Text(
-                        text = "IPv4",
+                        text = stringResource(R.string.ipv4),
                         modifier = Modifier
                             .clickable { onIpv4Change(!settings.enableIpv4) }
                             .padding(end = 16.dp)
@@ -361,20 +446,20 @@ class MainActivity : ComponentActivity() {
                         onCheckedChange = onIpv6Change
                     )
                     Text(
-                        text = "IPv6",
+                        text = stringResource(R.string.ipv6),
                         modifier = Modifier.clickable { onIpv6Change(!settings.enableIpv6) }
                     )
                 }
 
                 if (!settings.enableIpv4 && !settings.enableIpv6) {
                     Text(
-                        text = "At least one protocol must stay enabled",
+                        text = stringResource(R.string.at_least_one_protocol),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
                 } else if (!settings.enableIpv4) {
                     Text(
-                        text = "IPv4 disabled: mapped DNS is unavailable, so domain resolution may fail",
+                        text = stringResource(R.string.ipv4_disabled_dns_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -429,20 +514,20 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "VPN App Selection",
+                            text = stringResource(R.string.vpn_app_selection),
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
                             text = if (selectedPackages.isEmpty()) {
-                                "No app selected: VPN applies to all apps except this app"
+                                stringResource(R.string.vpn_no_app_selected)
                             } else {
-                                "Only selected apps use VPN"
+                                stringResource(R.string.vpn_selected_apps_only)
                             },
                             style = MaterialTheme.typography.bodySmall
                         )
                         if (isRunning) {
                             Text(
-                                text = "Changes take effect next time the VPN starts",
+                                text = stringResource(R.string.changes_take_effect_next_time),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -453,7 +538,7 @@ class MainActivity : ComponentActivity() {
                         onClick = onClear,
                         enabled = selectedPackages.isNotEmpty()
                     ) {
-                        Text("Clear")
+                        Text(stringResource(R.string.clear))
                     }
                 }
 
@@ -464,8 +549,8 @@ class MainActivity : ComponentActivity() {
                     onValueChange = { searchQuery = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Search apps") },
-                    placeholder = { Text("App name or package") }
+                    label = { Text(stringResource(R.string.search_apps)) },
+                    placeholder = { Text(stringResource(R.string.app_name_or_package)) }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -483,7 +568,11 @@ class MainActivity : ComponentActivity() {
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (apps.isEmpty()) "No user-installed apps found" else "No apps match the search",
+                                text = if (apps.isEmpty()) {
+                                    stringResource(R.string.no_user_installed_apps_found)
+                                } else {
+                                    stringResource(R.string.no_apps_match_search)
+                                },
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -564,7 +653,11 @@ class MainActivity : ComponentActivity() {
                         lineHeight = 16.sp,
                         modifier = Modifier.clickable {
                             clipboard.setText(AnnotatedString(log))
-                            Toast.makeText(context, "日志已复制", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.log_copied),
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     )
                 }
