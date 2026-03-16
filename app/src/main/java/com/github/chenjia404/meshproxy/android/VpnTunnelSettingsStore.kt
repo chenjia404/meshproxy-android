@@ -4,7 +4,7 @@ import android.content.Context
 
 data class VpnTunnelSettings(
     val enableIpv4: Boolean = true,
-    val enableIpv6: Boolean = true,
+    val enableIpv6: Boolean = false,
 )
 
 object VpnTunnelSettingsStore {
@@ -17,7 +17,7 @@ object VpnTunnelSettingsStore {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return VpnTunnelSettings(
             enableIpv4 = prefs.getBoolean(KEY_ENABLE_IPV4, true),
-            enableIpv6 = prefs.getBoolean(KEY_ENABLE_IPV6, true),
+            enableIpv6 = prefs.getBoolean(KEY_ENABLE_IPV6, false),
         )
     }
 
