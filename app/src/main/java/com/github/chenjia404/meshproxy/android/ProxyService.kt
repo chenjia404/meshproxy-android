@@ -74,7 +74,9 @@ class ProxyService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> requestStopProxy()
-            else -> startProxy()
+            ACTION_START_BACKGROUND -> startProxy(startVpn = false)
+            ACTION_START_VPN -> startVpnOnly()
+            else -> startProxy(startVpn = true)
         }
         return START_STICKY
     }
@@ -91,7 +93,7 @@ class ProxyService : VpnService() {
         super.onDestroy()
     }
 
-    private fun startProxy() {
+    private fun startProxy(startVpn: Boolean) {
         synchronized(stateLock) {
             if (startupJob?.isActive == true || process != null || tunFd != null) {
                 return
@@ -125,6 +127,50 @@ class ProxyService : VpnService() {
             startProcessObservers(startedProcess)
 
             val socksReadyFailure = waitForSocksReady(startedProcess)
+            if (socksReadyFailure != null) {
+                emitLog(
+                    getString(
+                        R.string.log_stopped_waiting_for_socks,
+                        SOCKS_HOST,
+                        SOCKS_PORT,
+                        socksReadyFailure
+                    )
+                )
+                if (startVpn) {
+                    requestStopProxy()
+                }
+                return@launch
+            }
+
+            if (startVpn) {
+                if (!startTunnel()) {
+                    emitLog(getString(R.string.log_failed_start_vpn_tunnel))
+                    requestStopProxy()
+                    return@launch
+                }
+
+                emitLog(getString(R.string.log_vpn_active_via_socks, SOCKS_HOST, SOCKS_PORT))
+            } else {
+                emitLog(getString(R.string.log_meshproxy_started_waiting_socks, SOCKS_HOST, SOCKS_PORT))
+            }
+        }
+    }
+
+    private fun startVpnOnly() {
+        synchronized(stateLock) {
+            if (tunFd != null) {
+                return
+            }
+        }
+
+        serviceScope.launch {
+            val currentProcess = synchronized(stateLock) { process }
+            if (currentProcess == null) {
+                startProxy(startVpn = true)
+                return@launch
+            }
+
+            val socksReadyFailure = waitForSocksReady(currentProcess)
             if (socksReadyFailure != null) {
                 emitLog(
                     getString(
@@ -521,6 +567,8 @@ class ProxyService : VpnService() {
     companion object {
         const val ACTION_START = "com.github.chenjia404.meshproxy.android.START"
         const val ACTION_STOP = "com.github.chenjia404.meshproxy.android.STOP"
+        const val ACTION_START_BACKGROUND = "com.github.chenjia404.meshproxy.android.START_BACKGROUND"
+        const val ACTION_START_VPN = "com.github.chenjia404.meshproxy.android.START_VPN"
 
         private const val SERVICE_CHANNEL_ID = "proxy_service_channel"
         private const val VPN_ACTIVE_CHANNEL_ID = "proxy_vpn_active_channel"

@@ -14,6 +14,8 @@
     <string name="real_time_logs">实时日志</string>
     <string name="clear">清空</string>
     <string name="proxy_status">代理状态</string>
+    <string name="console">控制台</string>
+    <string name="chat">聊天</string>
     <string name="relay_exit_status">中继: %1$s    出口: %2$s</string>
     <string name="peer_id_value">peer id: %1$s</string>
     <string name="uptime_seconds_value">运行时间: %1$s</string>

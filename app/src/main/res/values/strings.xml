@@ -14,6 +14,8 @@
     <string name="real_time_logs">Real-time Logs</string>
     <string name="clear">Clear</string>
     <string name="proxy_status">Proxy Status</string>
+    <string name="console">Console</string>
+    <string name="chat">Chat</string>
     <string name="relay_exit_status">Relay: %1$s    Exit: %2$s</string>
     <string name="peer_id_value">peer id: %1$s</string>
     <string name="uptime_seconds_value">uptime: %1$s</string>

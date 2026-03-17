@@ -13,8 +13,8 @@ android {
         applicationId = "com.github.chenjia404.meshproxy.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.3"
+        versionCode = 7
+        versionName = "1.0.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

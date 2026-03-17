@@ -110,6 +110,14 @@ class ProxyViewModel : ViewModel() {
         startStatusPolling()
     }
 
+    fun startVpn(context: Context) {
+        val intent = Intent(context, ProxyService::class.java)
+        intent.action = ProxyService.ACTION_START_VPN
+        context.startService(intent)
+        _isRunning.value = true
+        startStatusPolling()
+    }
+
     fun stopProxy(context: Context) {
         val intent = Intent(context, ProxyService::class.java)
         intent.action = ProxyService.ACTION_STOP

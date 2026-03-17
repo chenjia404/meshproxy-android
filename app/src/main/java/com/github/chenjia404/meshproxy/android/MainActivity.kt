@@ -11,6 +11,8 @@ import android.net.VpnService
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Build
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -76,6 +79,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    enum class HomeTab {
+        Status,
+        Console,
+        Chat
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun ProxyDashboard(viewModel: ProxyViewModel = viewModel()) {
@@ -91,6 +100,31 @@ class MainActivity : ComponentActivity() {
         val bound by isBound
         val pageScrollState = rememberScrollState()
         val logViewerHeight = configuration.screenHeightDp.dp
+        var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Status) }
+        val consoleLoadedSuccessfully = remember { mutableStateOf(false) }
+        val chatLoadedSuccessfully = remember { mutableStateOf(false) }
+        val consoleWebView = remember {
+            WebView(context).apply {
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        consoleLoadedSuccessfully.value = true
+                    }
+                }
+                settings.javaScriptEnabled = true
+            }
+        }
+        val chatWebView = remember {
+            WebView(context).apply {
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        chatLoadedSuccessfully.value = true
+                    }
+                }
+                settings.javaScriptEnabled = true
+            }
+        }
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission()
         ) { granted ->
@@ -115,6 +149,10 @@ class MainActivity : ComponentActivity() {
         // Sync service status on start
         LaunchedEffect(Unit) {
             viewModel.updateServiceStatus(context)
+            Intent(context, ProxyService::class.java).also { intent ->
+                intent.action = ProxyService.ACTION_START_BACKGROUND
+                ContextCompat.startForegroundService(context, intent)
+            }
             viewModel.loadVpnApps(context)
             viewModel.loadTunnelSettings(context)
             viewModel.checkForAppUpdate(context)
@@ -126,6 +164,23 @@ class MainActivity : ComponentActivity() {
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        // Ensure WebView loads (or reloads) when其所在 Tab 被打開且之前未成功載入
+        LaunchedEffect(selectedTab) {
+            when (selectedTab) {
+                HomeTab.Console -> {
+                    if (!consoleLoadedSuccessfully.value) {
+                        consoleWebView.loadUrl(CONSOLE_URL)
+                    }
+                }
+                HomeTab.Chat -> {
+                    if (!chatLoadedSuccessfully.value) {
+                        chatWebView.loadUrl(CHAT_URL)
+                    }
+                }
+                else -> Unit
             }
         }
 
@@ -163,6 +218,28 @@ class MainActivity : ComponentActivity() {
                     )
                 )
             },
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = selectedTab == HomeTab.Status,
+                        onClick = { selectedTab = HomeTab.Status },
+                        icon = {},
+                        label = { Text(stringResource(R.string.proxy_status)) }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == HomeTab.Console,
+                        onClick = { selectedTab = HomeTab.Console },
+                        icon = {},
+                        label = { Text(stringResource(R.string.console)) }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == HomeTab.Chat,
+                        onClick = { selectedTab = HomeTab.Chat },
+                        icon = {},
+                        label = { Text(stringResource(R.string.chat)) }
+                    )
+                }
+            },
             modifier = Modifier.fillMaxSize()
         ) { innerPadding ->
             appUpdateInfo?.let { updateInfo ->
@@ -183,7 +260,7 @@ class MainActivity : ComponentActivity() {
                     confirmButton = {
                         TextButton(
                             onClick = {
-                                openReleasePage(context, updateInfo.releaseUrl)
+                                openUrl(context, updateInfo.releaseUrl)
                                 viewModel.dismissAppUpdatePrompt()
                             }
                         ) {
@@ -200,146 +277,178 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            Column(
-                modifier = Modifier
-                    .padding(innerPadding)
-                    .fillMaxSize()
-                    .verticalScroll(pageScrollState)
-                    .padding(16.dp)
-            ) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Row(
+            when (selectedTab) {
+                HomeTab.Status -> {
+                    Column(
                         modifier = Modifier
+                            .padding(innerPadding)
+                            .fillMaxSize()
+                            .verticalScroll(pageScrollState)
                             .padding(16.dp)
-                            .fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text(
-                                text = if (isRunning) {
-                                    stringResource(R.string.proxy_running)
-                                } else {
-                                    stringResource(R.string.proxy_stopped)
-                                },
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                text = stringResource(R.string.control_background_binary_process),
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        
-                        FilledIconButton(
-                            onClick = {
-                                if (isRunning) {
-                                    viewModel.stopProxy(context)
-                                } else {
-                                    if (!tunnelSettings.enableIpv4 && !tunnelSettings.enableIpv6) {
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(R.string.enable_ipv4_or_ipv6),
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        return@FilledIconButton
-                                    }
-                                    val prepareIntent = VpnService.prepare(context)
-                                    if (prepareIntent != null) {
-                                        vpnPermissionLauncher.launch(prepareIntent)
-                                    } else {
-                                        viewModel.startProxy(context)
-                                    }
-                                }
-                            },
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
                             )
                         ) {
-                            Icon(
-                                imageVector = if (isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
-                                contentDescription = if (isRunning) {
-                                    stringResource(R.string.stop_proxy)
-                                } else {
-                                    stringResource(R.string.start_proxy)
+                            Row(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(
+                                        text = if (isRunning) {
+                                            stringResource(R.string.proxy_running)
+                                        } else {
+                                            stringResource(R.string.proxy_stopped)
+                                        },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.control_background_binary_process),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
                                 }
-                            )
+
+                                FilledIconButton(
+                                    onClick = {
+                                        if (isRunning) {
+                                            viewModel.stopProxy(context)
+                                        } else {
+                                            if (!tunnelSettings.enableIpv4 && !tunnelSettings.enableIpv6) {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.enable_ipv4_or_ipv6),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                return@FilledIconButton
+                                            }
+                                            val prepareIntent = VpnService.prepare(context)
+                                            if (prepareIntent != null) {
+                                                vpnPermissionLauncher.launch(prepareIntent)
+                                            } else {
+                                        viewModel.startVpn(context)
+                                            }
+                                        }
+                                    },
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = if (isRunning) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
+                                        contentDescription = if (isRunning) {
+                                            stringResource(R.string.stop_proxy)
+                                        } else {
+                                            stringResource(R.string.start_proxy)
+                                        }
+                                    )
+                                }
+                            }
                         }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        ProxyStatusPanel(
+                            status = proxyStatus,
+                            isRunning = isRunning
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        TunnelProtocolSelector(
+                            settings = tunnelSettings,
+                            isRunning = isRunning,
+                            onIpv4Change = { enabled ->
+                                viewModel.setIpv4Enabled(context, enabled)
+                            },
+                            onIpv6Change = { enabled ->
+                                viewModel.setIpv6Enabled(context, enabled)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        VpnAppSelector(
+                            apps = vpnApps,
+                            selectedPackages = selectedVpnApps,
+                            isRunning = isRunning,
+                            onToggle = { packageName, selected ->
+                                viewModel.setVpnAppSelected(context, packageName, selected)
+                            },
+                            onClear = {
+                                viewModel.clearVpnAppSelection(context)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = stringResource(R.string.real_time_logs),
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            TextButton(
+                                onClick = { viewModel.clearLogs() },
+                                enabled = logs.isNotEmpty()
+                            ) {
+                                Text(stringResource(R.string.clear))
+                            }
+                        }
+
+                        LogViewer(
+                            logs = logs,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(logViewerHeight)
+                        )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                ProxyStatusPanel(
-                    status = proxyStatus,
-                    isRunning = isRunning
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                TunnelProtocolSelector(
-                    settings = tunnelSettings,
-                    isRunning = isRunning,
-                    onIpv4Change = { enabled ->
-                        viewModel.setIpv4Enabled(context, enabled)
-                    },
-                    onIpv6Change = { enabled ->
-                        viewModel.setIpv6Enabled(context, enabled)
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                VpnAppSelector(
-                    apps = vpnApps,
-                    selectedPackages = selectedVpnApps,
-                    isRunning = isRunning,
-                    onToggle = { packageName, selected ->
-                        viewModel.setVpnAppSelected(context, packageName, selected)
-                    },
-                    onClear = {
-                        viewModel.clearVpnAppSelection(context)
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.real_time_logs),
-                        style = MaterialTheme.typography.labelLarge
+                HomeTab.Console -> {
+                    WebViewContainer(
+                        webView = consoleWebView,
+                        modifier = Modifier
+                            .padding(innerPadding)
+                            .fillMaxSize()
                     )
-                    TextButton(
-                        onClick = { viewModel.clearLogs() },
-                        enabled = logs.isNotEmpty()
-                    ) {
-                        Text(stringResource(R.string.clear))
-                    }
                 }
-
-                LogViewer(
-                    logs = logs,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(logViewerHeight)
-                )
+                HomeTab.Chat -> {
+                    WebViewContainer(
+                        webView = chatWebView,
+                        modifier = Modifier
+                            .padding(innerPadding)
+                            .fillMaxSize()
+                    )
+                }
             }
         }
     }
 
-    private fun openReleasePage(context: Context, releaseUrl: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl)).apply {
+    @Composable
+    fun WebViewContainer(
+        webView: WebView,
+        modifier: Modifier = Modifier,
+    ) {
+        AndroidView(
+            modifier = modifier,
+            factory = { webView },
+            update = { }
+        )
+    }
+
+    private fun openUrl(context: Context, url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
@@ -402,6 +511,28 @@ class MainActivity : ComponentActivity() {
                     text = stringResource(R.string.socks5_listen_value, status.socks5Listen ?: "-"),
                     style = MaterialTheme.typography.bodySmall
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { openUrl(context, CONSOLE_URL) },
+                        enabled = isRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(stringResource(R.string.console))
+                    }
+                    OutlinedButton(
+                        onClick = { openUrl(context, CHAT_URL) },
+                        enabled = isRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(stringResource(R.string.chat))
+                    }
+                }
 
                 if (isRunning && status.isLoading) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -708,5 +839,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        private const val CONSOLE_URL = "http://127.0.0.1:19080/console"
+        private const val CHAT_URL = "http://127.0.0.1:19080/chat"
     }
 }
