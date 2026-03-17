@@ -11,7 +11,9 @@ import android.net.VpnService
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Build
+import android.webkit.ValueCallback
 import android.webkit.WebView
+import android.webkit.WebChromeClient
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -103,6 +105,70 @@ class MainActivity : ComponentActivity() {
         var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Status) }
         val consoleLoadedSuccessfully = remember { mutableStateOf(false) }
         val chatLoadedSuccessfully = remember { mutableStateOf(false) }
+        val webViewFileChooserCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+        val fileChooserLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val callback = webViewFileChooserCallback.value
+            if (callback == null) return@rememberLauncherForActivityResult
+
+            val uris = if (result.resultCode == RESULT_OK) {
+                val data = result.data
+                when {
+                    data == null -> null
+                    data.clipData != null -> {
+                        val clip = data.clipData!!
+                        Array(clip.itemCount) { idx -> clip.getItemAt(idx).uri }
+                    }
+                    data.data != null -> arrayOf(data.data!!)
+                    else -> null
+                }
+            } else {
+                null
+            }
+
+            callback.onReceiveValue(uris)
+            webViewFileChooserCallback.value = null
+        }
+        val sharedWebChromeClient = remember {
+            object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    filePathCallback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?
+                ): Boolean {
+                    if (filePathCallback == null) return false
+
+                    // 若上一次未回收，先回覆 null，避免 callback 遺失
+                    webViewFileChooserCallback.value?.onReceiveValue(null)
+                    webViewFileChooserCallback.value = filePathCallback
+
+                    val intent = try {
+                        fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                    } catch (_: Throwable) {
+                        Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                    }.apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE)
+                    }
+
+                    return try {
+                        fileChooserLauncher.launch(intent)
+                        true
+                    } catch (_: Throwable) {
+                        webViewFileChooserCallback.value?.onReceiveValue(null)
+                        webViewFileChooserCallback.value = null
+                        false
+                    }
+                }
+            }
+        }
         val consoleWebView = remember {
             WebView(context).apply {
                 webViewClient = object : WebViewClient() {
@@ -111,7 +177,11 @@ class MainActivity : ComponentActivity() {
                         consoleLoadedSuccessfully.value = true
                     }
                 }
+                webChromeClient = sharedWebChromeClient
                 settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = true
+                settings.allowContentAccess = true
             }
         }
         val chatWebView = remember {
@@ -122,7 +192,11 @@ class MainActivity : ComponentActivity() {
                         chatLoadedSuccessfully.value = true
                     }
                 }
+                webChromeClient = sharedWebChromeClient
                 settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = true
+                settings.allowContentAccess = true
             }
         }
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
