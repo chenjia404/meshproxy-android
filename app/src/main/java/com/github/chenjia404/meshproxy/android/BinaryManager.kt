@@ -7,6 +7,9 @@ import java.io.IOException
 class BinaryManager(private val context: Context) {
 
     private val binaryName = "libmeshproxy.so"
+    private val p2pListenAddrsArg =
+        "--p2p.listen_addrs=/ip4/0.0.0.0/tcp/4002,/ip6/::/tcp/4002"
+    private val socks5ListenArg = "--socks5.listen=127.0.0.1:1082"
     private val binaryFile: File by lazy {
         File(context.applicationInfo.nativeLibraryDir, binaryName)
     }
@@ -24,7 +27,7 @@ class BinaryManager(private val context: Context) {
 
         return try {
             binaryFile.setExecutable(true, true)
-            ProcessBuilder(binaryFile.absolutePath)
+            ProcessBuilder(binaryFile.absolutePath, p2pListenAddrsArg, socks5ListenArg)
                 .directory(context.filesDir)
                 .redirectErrorStream(true)
                 .start()
