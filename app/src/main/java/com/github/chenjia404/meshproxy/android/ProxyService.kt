@@ -574,7 +574,7 @@ class ProxyService : VpnService() {
         private const val VPN_ACTIVE_CHANNEL_ID = "proxy_vpn_active_channel"
         private const val NOTIFICATION_ID = 1
         private const val SOCKS_HOST = "127.0.0.1"
-        private const val SOCKS_PORT = 1080
+        private const val SOCKS_PORT = 1082
         private const val SOCKS_RETRY_DELAY_MS = 1_000L
         private const val SOCKS_CONNECT_TIMEOUT_MS = 1_000
         private const val SOCKS_PROGRESS_LOG_INTERVAL_MS = 10_000L

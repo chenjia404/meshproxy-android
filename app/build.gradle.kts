@@ -13,8 +13,8 @@ android {
         applicationId = "com.github.chenjia404.meshproxy.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.0.8"
+        versionCode = 15
+        versionName = "1.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -63,6 +63,33 @@ android {
             path = file("src/main/jni/hev-socks5-tunnel/Android.mk")
         }
     }
+}
+
+// Rename assembled APK output to include versionName.
+// Kotlin DSL + AGP 9 doesn't expose the same applicationVariants APIs reliably,
+// so we rename the produced APK file after assemble.
+afterEvaluate {
+    val versionName = android.defaultConfig.versionName ?: "0"
+
+    fun renameApk(assembleTaskName: String, buildType: String) {
+        tasks.named(assembleTaskName).configure {
+            doLast {
+                val outDir = layout.buildDirectory.dir("outputs/apk/$buildType").get().asFile
+                val apks = outDir.listFiles { f -> f.isFile && f.name.endsWith(".apk") } ?: emptyArray()
+                val apk = apks.maxByOrNull { it.lastModified() } ?: return@doLast
+
+                val newFileName = apk.name
+                    .replace("app", "meshproxy-android-v${versionName}")
+                    .replace(".apk", ".apk")
+                val newFile = File(outDir, newFileName)
+                if (newFile.exists()) newFile.delete()
+                apk.renameTo(newFile)
+            }
+        }
+    }
+
+    renameApk("assembleDebug", "debug")
+    renameApk("assembleRelease", "release")
 }
 
 dependencies {

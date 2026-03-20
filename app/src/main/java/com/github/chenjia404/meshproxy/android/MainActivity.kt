@@ -11,12 +11,17 @@ import android.net.VpnService
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Build
+import android.util.Log
 import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -29,6 +34,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.*
@@ -74,6 +80,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.TYPE == "debug") {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         setContent {
             MeshproxyandroidTheme {
                 ProxyDashboard()
@@ -83,7 +92,6 @@ class MainActivity : ComponentActivity() {
 
     enum class HomeTab {
         Status,
-        Console,
         Chat
     }
 
@@ -103,6 +111,8 @@ class MainActivity : ComponentActivity() {
         val pageScrollState = rememberScrollState()
         val logViewerHeight = configuration.screenHeightDp.dp
         var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Status) }
+        var isConsoleStandaloneOpen by rememberSaveable { mutableStateOf(false) }
+        var isChatStandaloneOpen by rememberSaveable { mutableStateOf(false) }
         val consoleLoadedSuccessfully = remember { mutableStateOf(false) }
         val chatLoadedSuccessfully = remember { mutableStateOf(false) }
         val webViewFileChooserCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
@@ -167,36 +177,57 @@ class MainActivity : ComponentActivity() {
                         false
                     }
                 }
+
+                override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                    // 直接把 JS console 輸出到 Logcat，便於定位渲染/腳本中斷原因
+                    Log.d(
+                        "MainActivity",
+                        "WebView JS console level=${consoleMessage.messageLevel()} msg=${consoleMessage.message()} url=${consoleMessage.sourceId()} line=${consoleMessage.lineNumber()}"
+                    )
+                    return super.onConsoleMessage(consoleMessage)
+                }
             }
         }
         val consoleWebView = remember {
             WebView(context).apply {
                 webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, url: String?) {
-                        super.onPageFinished(view, url)
-                        consoleLoadedSuccessfully.value = true
-                    }
+
                 }
                 webChromeClient = sharedWebChromeClient
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
+                settings.javaScriptCanOpenWindowsAutomatically = true
+
+                // Ensure cookies are usable inside WebView.
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             }
         }
         val chatWebView = remember {
             WebView(context).apply {
                 webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, url: String?) {
-                        super.onPageFinished(view, url)
-                        chatLoadedSuccessfully.value = true
-                    }
                 }
                 webChromeClient = sharedWebChromeClient
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 settings.allowContentAccess = true
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
+                settings.javaScriptCanOpenWindowsAutomatically = true
+
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             }
         }
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -242,20 +273,38 @@ class MainActivity : ComponentActivity() {
         }
 
         // Ensure WebView loads (or reloads) when其所在 Tab 被打開且之前未成功載入
-        LaunchedEffect(selectedTab) {
-            when (selectedTab) {
-                HomeTab.Console -> {
+        LaunchedEffect(selectedTab, isConsoleStandaloneOpen, isChatStandaloneOpen) {
+            when {
+                isConsoleStandaloneOpen -> {
                     if (!consoleLoadedSuccessfully.value) {
                         consoleWebView.loadUrl(CONSOLE_URL)
                     }
                 }
-                HomeTab.Chat -> {
+                selectedTab == HomeTab.Chat || isChatStandaloneOpen -> {
                     if (!chatLoadedSuccessfully.value) {
                         chatWebView.loadUrl(CHAT_URL)
                     }
                 }
                 else -> Unit
             }
+        }
+
+        if (isConsoleStandaloneOpen) {
+            ConsoleStandalonePage(
+                title = stringResource(R.string.console),
+                webView = consoleWebView,
+                onBack = { isConsoleStandaloneOpen = false }
+            )
+            return
+        }
+
+        if (isChatStandaloneOpen) {
+            ChatStandalonePage(
+                title = stringResource(R.string.chat),
+                webView = chatWebView,
+                onBack = { isChatStandaloneOpen = false }
+            )
+            return
         }
 
         // Collect logs from service if bound
@@ -284,35 +333,13 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             topBar = {
-                TopAppBar(
+                CenterAlignedTopAppBar(
                     title = { Text(stringResource(R.string.app_name)) },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 )
-            },
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = selectedTab == HomeTab.Status,
-                        onClick = { selectedTab = HomeTab.Status },
-                        icon = {},
-                        label = { Text(stringResource(R.string.proxy_status)) }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == HomeTab.Console,
-                        onClick = { selectedTab = HomeTab.Console },
-                        icon = {},
-                        label = { Text(stringResource(R.string.console)) }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == HomeTab.Chat,
-                        onClick = { selectedTab = HomeTab.Chat },
-                        icon = {},
-                        label = { Text(stringResource(R.string.chat)) }
-                    )
-                }
             },
             modifier = Modifier.fillMaxSize()
         ) { innerPadding ->
@@ -430,7 +457,9 @@ class MainActivity : ComponentActivity() {
 
                         ProxyStatusPanel(
                             status = proxyStatus,
-                            isRunning = isRunning
+                            isRunning = isRunning,
+                            onOpenConsole = { isConsoleStandaloneOpen = true },
+                            onOpenChat = { isChatStandaloneOpen = true }
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -489,14 +518,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
-                HomeTab.Console -> {
-                    WebViewContainer(
-                        webView = consoleWebView,
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
-                    )
-                }
                 HomeTab.Chat -> {
                     WebViewContainer(
                         webView = chatWebView,
@@ -532,6 +553,8 @@ class MainActivity : ComponentActivity() {
     fun ProxyStatusPanel(
         status: ProxyStatusSnapshot,
         isRunning: Boolean,
+        onOpenConsole: () -> Unit,
+        onOpenChat: () -> Unit,
     ) {
         val clipboard = LocalClipboardManager.current
         val context = LocalContext.current
@@ -593,15 +616,13 @@ class MainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
-                        onClick = { openUrl(context, CONSOLE_URL) },
-                        enabled = isRunning,
+                        onClick = onOpenConsole,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(stringResource(R.string.console))
                     }
                     OutlinedButton(
-                        onClick = { openUrl(context, CHAT_URL) },
-                        enabled = isRunning,
+                        onClick = onOpenChat,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(stringResource(R.string.chat))
@@ -638,6 +659,82 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun ConsoleStandalonePage(
+        title: String,
+        webView: WebView,
+        onBack: () -> Unit,
+    ) {
+        BackHandler(onBack = onBack)
+
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(title) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = title
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            WebViewContainer(
+                webView = webView,
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+            )
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun ChatStandalonePage(
+        title: String,
+        webView: WebView,
+        onBack: () -> Unit,
+    ) {
+        BackHandler(onBack = onBack)
+
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(title) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = title
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            WebViewContainer(
+                webView = webView,
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+            )
         }
     }
 
