@@ -90,11 +90,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    enum class HomeTab {
-        Status,
-        Chat
-    }
-
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun ProxyDashboard(viewModel: ProxyViewModel = viewModel()) {
@@ -110,11 +105,8 @@ class MainActivity : ComponentActivity() {
         val bound by isBound
         val pageScrollState = rememberScrollState()
         val logViewerHeight = configuration.screenHeightDp.dp
-        var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Status) }
         var isConsoleStandaloneOpen by rememberSaveable { mutableStateOf(false) }
-        var isChatStandaloneOpen by rememberSaveable { mutableStateOf(false) }
         val consoleLoadedSuccessfully = remember { mutableStateOf(false) }
-        val chatLoadedSuccessfully = remember { mutableStateOf(false) }
         val webViewFileChooserCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
         val fileChooserLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
@@ -210,26 +202,6 @@ class MainActivity : ComponentActivity() {
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             }
         }
-        val chatWebView = remember {
-            WebView(context).apply {
-                webViewClient = object : WebViewClient() {
-                }
-                webChromeClient = sharedWebChromeClient
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.allowFileAccess = true
-                settings.allowContentAccess = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
-                settings.builtInZoomControls = true
-                settings.displayZoomControls = false
-                settings.useWideViewPort = true
-                settings.loadWithOverviewMode = true
-                settings.javaScriptCanOpenWindowsAutomatically = true
-
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            }
-        }
         val notificationPermissionLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission()
         ) { granted ->
@@ -272,20 +244,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Ensure WebView loads (or reloads) when其所在 Tab 被打開且之前未成功載入
-        LaunchedEffect(selectedTab, isConsoleStandaloneOpen, isChatStandaloneOpen) {
-            when {
-                isConsoleStandaloneOpen -> {
-                    if (!consoleLoadedSuccessfully.value) {
-                        consoleWebView.loadUrl(CONSOLE_URL)
-                    }
-                }
-                selectedTab == HomeTab.Chat || isChatStandaloneOpen -> {
-                    if (!chatLoadedSuccessfully.value) {
-                        chatWebView.loadUrl(CHAT_URL)
-                    }
-                }
-                else -> Unit
+        // Ensure WebView loads (or reloads) when 控制台獨立頁打開且之前未成功載入
+        LaunchedEffect(isConsoleStandaloneOpen) {
+            if (isConsoleStandaloneOpen && !consoleLoadedSuccessfully.value) {
+                consoleWebView.loadUrl(CONSOLE_URL)
             }
         }
 
@@ -294,15 +256,6 @@ class MainActivity : ComponentActivity() {
                 title = stringResource(R.string.console),
                 webView = consoleWebView,
                 onBack = { isConsoleStandaloneOpen = false }
-            )
-            return
-        }
-
-        if (isChatStandaloneOpen) {
-            ChatStandalonePage(
-                title = stringResource(R.string.chat),
-                webView = chatWebView,
-                onBack = { isChatStandaloneOpen = false }
             )
             return
         }
@@ -378,9 +331,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            when (selectedTab) {
-                HomeTab.Status -> {
-                    Column(
+            Column(
                         modifier = Modifier
                             .padding(innerPadding)
                             .fillMaxSize()
@@ -459,7 +410,7 @@ class MainActivity : ComponentActivity() {
                             status = proxyStatus,
                             isRunning = isRunning,
                             onOpenConsole = { isConsoleStandaloneOpen = true },
-                            onOpenChat = { isChatStandaloneOpen = true }
+                            onOpenChat = { openUrl(context, CHAT_URL) }
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -517,15 +468,6 @@ class MainActivity : ComponentActivity() {
                                 .height(logViewerHeight)
                         )
                     }
-                }
-                HomeTab.Chat -> {
-                    WebViewContainer(
-                        webView = chatWebView,
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
-                    )
-                }
             }
         }
     }
